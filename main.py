@@ -1,6 +1,9 @@
 import os
 import json
 import requests
+import ragas as rg
+from ragas.metrics import faithfulness, answer_correctness
+
 from typing import List, Dict, Any, Optional
 import re
 from processFile import ProcessFile
@@ -10,6 +13,9 @@ from processFile import ProcessFile
 #   pip install chonkie pinecone-client
 from chonkie import SemanticChunker
 from pinecone import Pinecone
+from dotenv import load_dotenv
+
+load_dotenv()
 
 mapa = {
   'á':'a','Á':'A','à':'a','À':'A','ä':'a','Ä':'A','â':'a','Â':'A','ã':'a','Ã':'A',
@@ -363,11 +369,12 @@ Answer:"""
 if __name__ == "__main__":
     # Initialize the RAG system
     # Prefer environment variables instead of hardcoding secrets.
-    PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "pcsk_4WFrQ8_GkUJKEz5duWPZmdXzZMLRjoQV6Dz4J9C8vDzYhps6Cf3ESTgK1jXE6Vh8janmzf")
-    PINECONE_INDEX = os.getenv("PINECONE_INDEX", "proof2")
-    print('++++++++')
+    PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", None)
+    PINECONE_INDEX = os.getenv("PINECONE_INDEX", None)
+    print('ENVS')
     print(PINECONE_API_KEY)
-
+    print(PINECONE_INDEX)
+    
     rag_system = OllamaRAGSystem(
         pinecone_api_key=PINECONE_API_KEY,
         pinecone_index=PINECONE_INDEX,
@@ -379,22 +386,75 @@ if __name__ == "__main__":
     # rag_system.process_document_pipeline(document_path)
 
     # --- Example queries ---
+    test_queries = [
+        {
+            'question' : 'Where was the wife of Francis I Rákóczi born?',
+            'response': 'Ozalj'
+        },
+        {
+            'question' : "Who is Sobe (Sister Of Saint Anne)'s grandchild?",
+            'response': 'John the Baptist'
+        },
+        {
+            'question' : "Do both Beauty And The Bad Man and Wild Child (Film) films have the directors from the same country?",
+            'response': 'no'
+        },
+        {
+            'question' : "Who is Edward Watson, Viscount Sondes's paternal grandfather?",
+            'response': 'Edward Watson'
+        },
+        {
+            'question' : "What is the date of death of Humphrey De Bohun, 7Th Earl Of Hereford's father?",
+            'response': '16 September 1360'
+        },
+    ]
     queries = [
-        "Who are in on Association of Art Museum Directors?",
+        "Where was the wife of Francis I Rákóczi born?",
         # "Who is Chiara Mastroianni?", 
         # "Where was the wife of Francis I Rákóczi born?",
     ]
 
     # Process queries
-    for query in queries:
+    data = []
+    for query in test_queries:
         print("\n" + "="*50)
-        result = rag_system.query_pipeline(query, namespace="proof2")
+        result = rag_system.query_pipeline(query['question'], namespace="proof2")
 
         print(f"\nQuery: {result['query']}")
         print(f"Number of contexts retrieved: {result['num_contexts']}")
         print(f"\nResponse: {result['response']}")
+        data.append({
+            "query": result['query'],
+            "retrieved": result['contexts'],
+            "generated": result['response'],
+            "expected": query['response']
+        })
 
         # Optionally print contexts
         print(f"\nRetrieved Contexts:")
         for i, context in enumerate(result['contexts'], 1):
             print(f"{i}. {context[:200]}...")
+
+    # for query in queries:
+    #     print("\n" + "="*50)
+    #     result = rag_system.query_pipeline(query, namespace="proof2")
+
+    #     print(f"\nQuery: {result['query']}")
+    #     print(f"Number of contexts retrieved: {result['num_contexts']}")
+    #     print(f"\nResponse: {result['response']}")
+    #     data.append({
+    #         "query": result['query'],
+    #         "retrieved": result['contexts'],
+    #         "generated": result['response'],
+    #         "expected": "EXPECTED_ANSWER_HERE"
+    #     })
+
+    #     # Optionally print contexts
+    #     print(f"\nRetrieved Contexts:")
+    #     for i, context in enumerate(result['contexts'], 1):
+    #         print(f"{i}. {context[:200]}...")
+    results = rg.evaluate(data, metrics=[faithfulness, answer_correctness])
+    # Mostrar resultados
+    print("\nResultados de la evaluación:")
+    for metric, value in results.items():
+        print(f"{metric}: {value:.4f}")

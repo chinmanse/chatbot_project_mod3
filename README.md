@@ -11,10 +11,12 @@ source project_env/bin/activate
 ```
 ### Instalacion de ollama
 
-
+Linux debian
 ```
 curl -fsSL https://ollama.com/install.sh | sh
 ```
+
+Linux centos
 
 ```
 brew install ollama/tap/ollama
