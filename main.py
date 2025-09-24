@@ -2,11 +2,23 @@ import os
 import json
 import requests
 import ragas as rg
+from datasets import Dataset
 from ragas.metrics import faithfulness, answer_correctness
 
 from typing import List, Dict, Any, Optional
 import re
 from processFile import ProcessFile
+# from ragas.llms import Ollama
+# from ragas.llms.base import LLM
+
+from langchain_ollama import OllamaLLM
+from langchain_ollama import OllamaEmbeddings
+from langchain_ollama import ChatOllama
+from ragas.llms import LangchainLLMWrapper
+from ragas.embeddings import LangchainEmbeddingsWrapper
+from langchain_ollama import OllamaEmbeddings
+
+
 
 
 # External deps:
@@ -365,15 +377,44 @@ Answer:"""
         }
 
 
+# class OllamaLLM:
+#     def __init__(self, model="llama2"):
+#         self.model = model
+
+#     def generate(self, prompt: str) -> str:
+#         response = ollama.chat(
+#             model=self.model,
+#             messages=[{"role": "user", "content": prompt}]
+#         )
+#         return response["message"]["content"]
+
 # Example usage
 if __name__ == "__main__":
     # Initialize the RAG system
     # Prefer environment variables instead of hardcoding secrets.
     PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", None)
     PINECONE_INDEX = os.getenv("PINECONE_INDEX", None)
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
     print('ENVS')
     print(PINECONE_API_KEY)
     print(PINECONE_INDEX)
+    print(OPENAI_API_KEY)
+
+    chat_model = ChatOllama(
+        model="llama2:7b-chat",
+    )
+    llm = LangchainLLMWrapper(chat_model)
+    ollama_embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    embeddings = LangchainEmbeddingsWrapper(ollama_embeddings)
+    faithfulness.llm = llm
+    answer_correctness.llm = llm
+    answer_correctness.embeddings = embeddings
+    # llm = OllamaLLM(model="llama2")
+    # embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    # faithfulness.llm = llm
+    # answer_correctness.llm = llm
+    # answer_correctness.embeddings = embeddings
+
     
     rag_system = OllamaRAGSystem(
         pinecone_api_key=PINECONE_API_KEY,
@@ -391,22 +432,22 @@ if __name__ == "__main__":
             'question' : 'Where was the wife of Francis I Rákóczi born?',
             'response': 'Ozalj'
         },
-        {
-            'question' : "Who is Sobe (Sister Of Saint Anne)'s grandchild?",
-            'response': 'John the Baptist'
-        },
-        {
-            'question' : "Do both Beauty And The Bad Man and Wild Child (Film) films have the directors from the same country?",
-            'response': 'no'
-        },
-        {
-            'question' : "Who is Edward Watson, Viscount Sondes's paternal grandfather?",
-            'response': 'Edward Watson'
-        },
-        {
-            'question' : "What is the date of death of Humphrey De Bohun, 7Th Earl Of Hereford's father?",
-            'response': '16 September 1360'
-        },
+        # {
+        #     'question' : "Who is Sobe (Sister Of Saint Anne)'s grandchild?",
+        #     'response': 'John the Baptist'
+        # },
+        # {
+        #     'question' : "Do both Beauty And The Bad Man and Wild Child (Film) films have the directors from the same country?",
+        #     'response': 'no'
+        # },
+        # {
+        #     'question' : "Who is Edward Watson, Viscount Sondes's paternal grandfather?",
+        #     'response': 'Edward Watson'
+        # },
+        # {
+        #     'question' : "What is the date of death of Humphrey De Bohun, 7Th Earl Of Hereford's father?",
+        #     'response': '16 September 1360'
+        # },
     ]
     queries = [
         "Where was the wife of Francis I Rákóczi born?",
@@ -423,12 +464,34 @@ if __name__ == "__main__":
         print(f"\nQuery: {result['query']}")
         print(f"Number of contexts retrieved: {result['num_contexts']}")
         print(f"\nResponse: {result['response']}")
-        data.append({
-            "query": result['query'],
-            "retrieved": result['contexts'],
+        print(f"\nConexts:")
+        print(result['contexts'])
+        print(f"\nResponse: {result['response']}")
+        evalute_data = {
+            'question': result['query'],
+            'answer': query['response'],
+            'contexts': result['contexts'],
             "generated": result['response'],
-            "expected": query['response']
-        })
+            "expected": [query['response']],
+            'ground_truth': query['response'],
+        }
+        # evalute_data = {
+        #     'question': [result['query']],
+        #     'answer': [query['response']],
+        #     'contexts': [result['contexts']],
+        #     "query": [result['query']],
+        #     "retrieved": [result['contexts']],
+        #     "generated": [result['response']],
+        #     "expected": [query['response']],
+        #     'response': [query['response']],
+        #     'retrieved_contexts': [result['contexts']],
+        #     'user_input': [result['query']],
+        #     'reference': [query['response']],
+        #     'ground_truth': [query['response']],
+        # }
+        print('TO evaluate')
+        print(evalute_data)
+        data.append(evalute_data)
 
         # Optionally print contexts
         print(f"\nRetrieved Contexts:")
@@ -453,8 +516,21 @@ if __name__ == "__main__":
     #     print(f"\nRetrieved Contexts:")
     #     for i, context in enumerate(result['contexts'], 1):
     #         print(f"{i}. {context[:200]}...")
-    results = rg.evaluate(data, metrics=[faithfulness, answer_correctness])
+    dataset_result = Dataset.from_list(data)
+    results_faithfulness = rg.evaluate(dataset_result, metrics=[faithfulness])
+    print("\nResultados Evaluacion:")
+    print(results_faithfulness)
+    results = rg.evaluate(dataset_result, metrics=[ answer_correctness])
+
+    # Exportar resultados como dict
+    print("\nResultados agregados:")
+    print(results)
+
+    # print("\nResultados por muestra:")
+    # print(results.raw)
+
     # Mostrar resultados
-    print("\nResultados de la evaluación:")
-    for metric, value in results.items():
-        print(f"{metric}: {value:.4f}")
+    # print("\nResultados de la evaluación:")
+    # for metric, value in results.metrics.items():
+    #     print(f"{metric}: {value:.4f}")
+

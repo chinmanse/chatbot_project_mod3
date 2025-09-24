@@ -6,8 +6,12 @@ python3 -m venv project_env
 
 ## Acceso al entorno
 
-```
+```LINUX
 source project_env/bin/activate
+```
+
+```WINDOWS
+.\project_env\Scripts\activate.bat
 ```
 ### Instalacion de ollama
 
