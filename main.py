@@ -1,9 +1,12 @@
 import os
 import json
 import requests
+import time
 import ragas as rg
+import pandas as pd
+import matplotlib.pyplot as plt
 from datasets import Dataset
-from ragas.metrics import faithfulness, answer_correctness
+from ragas.metrics import faithfulness, answer_correctness, answer_relevancy
 
 from typing import List, Dict, Any, Optional
 import re
@@ -399,16 +402,21 @@ if __name__ == "__main__":
     print(PINECONE_API_KEY)
     print(PINECONE_INDEX)
     print(OPENAI_API_KEY)
+    
+
 
     chat_model = ChatOllama(
         model="llama2:7b-chat",
     )
     llm = LangchainLLMWrapper(chat_model)
-    ollama_embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    ollama_embeddings = OllamaEmbeddings(model="llama2:7b-chat")
     embeddings = LangchainEmbeddingsWrapper(ollama_embeddings)
     faithfulness.llm = llm
     answer_correctness.llm = llm
     answer_correctness.embeddings = embeddings
+    answer_relevancy.llm = llm
+    answer_relevancy.embeddings = embeddings
+
     # llm = OllamaLLM(model="llama2")
     # embeddings = OllamaEmbeddings(model="nomic-embed-text")
     # faithfulness.llm = llm
@@ -432,22 +440,22 @@ if __name__ == "__main__":
             'question' : 'Where was the wife of Francis I Rákóczi born?',
             'response': 'Ozalj'
         },
-        # {
-        #     'question' : "Who is Sobe (Sister Of Saint Anne)'s grandchild?",
-        #     'response': 'John the Baptist'
-        # },
-        # {
-        #     'question' : "Do both Beauty And The Bad Man and Wild Child (Film) films have the directors from the same country?",
-        #     'response': 'no'
-        # },
-        # {
-        #     'question' : "Who is Edward Watson, Viscount Sondes's paternal grandfather?",
-        #     'response': 'Edward Watson'
-        # },
-        # {
-        #     'question' : "What is the date of death of Humphrey De Bohun, 7Th Earl Of Hereford's father?",
-        #     'response': '16 September 1360'
-        # },
+        {
+            'question' : "Who is Sobe (Sister Of Saint Anne)'s grandchild?",
+            'response': 'John the Baptist'
+        },
+        {
+            'question' : "Do both Beauty And The Bad Man and Wild Child (Film) films have the directors from the same country?",
+            'response': 'no'
+        },
+        {
+            'question' : "Who is Edward Watson, Viscount Sondes's paternal grandfather?",
+            'response': 'Edward Watson'
+        },
+        {
+            'question' : "What is the date of death of Humphrey De Bohun, 7Th Earl Of Hereford's father?",
+            'response': '16 September 1360'
+        },
     ]
     queries = [
         "Where was the wife of Francis I Rákóczi born?",
@@ -457,7 +465,9 @@ if __name__ == "__main__":
 
     # Process queries
     data = []
+    latencies = []
     for query in test_queries:
+        start_time = time.time()
         print("\n" + "="*50)
         result = rag_system.query_pipeline(query['question'], namespace="proof2")
 
@@ -470,61 +480,64 @@ if __name__ == "__main__":
         evalute_data = {
             'question': result['query'],
             'answer': query['response'],
-            'contexts': result['contexts'],
+            'contexts': [result['contexts']] if isinstance(result['contexts'], str) else result['contexts'],
             "generated": result['response'],
             "expected": [query['response']],
             'ground_truth': query['response'],
         }
-        # evalute_data = {
-        #     'question': [result['query']],
-        #     'answer': [query['response']],
-        #     'contexts': [result['contexts']],
-        #     "query": [result['query']],
-        #     "retrieved": [result['contexts']],
-        #     "generated": [result['response']],
-        #     "expected": [query['response']],
-        #     'response': [query['response']],
-        #     'retrieved_contexts': [result['contexts']],
-        #     'user_input': [result['query']],
-        #     'reference': [query['response']],
-        #     'ground_truth': [query['response']],
-        # }
         print('TO evaluate')
         print(evalute_data)
         data.append(evalute_data)
+        end_time = time.time()
+        latency = end_time -start_time
+        latencies.append(latency)
 
         # Optionally print contexts
         print(f"\nRetrieved Contexts:")
         for i, context in enumerate(result['contexts'], 1):
             print(f"{i}. {context[:200]}...")
 
-    # for query in queries:
-    #     print("\n" + "="*50)
-    #     result = rag_system.query_pipeline(query, namespace="proof2")
-
-    #     print(f"\nQuery: {result['query']}")
-    #     print(f"Number of contexts retrieved: {result['num_contexts']}")
-    #     print(f"\nResponse: {result['response']}")
-    #     data.append({
-    #         "query": result['query'],
-    #         "retrieved": result['contexts'],
-    #         "generated": result['response'],
-    #         "expected": "EXPECTED_ANSWER_HERE"
-    #     })
-
-    #     # Optionally print contexts
-    #     print(f"\nRetrieved Contexts:")
-    #     for i, context in enumerate(result['contexts'], 1):
-    #         print(f"{i}. {context[:200]}...")
+    run_config = rg.RunConfig(
+        timeout=2048,
+        log_tenacity=True
+    )
     dataset_result = Dataset.from_list(data)
-    results_faithfulness = rg.evaluate(dataset_result, metrics=[faithfulness])
-    print("\nResultados Evaluacion:")
-    print(results_faithfulness)
-    results = rg.evaluate(dataset_result, metrics=[ answer_correctness])
-
-    # Exportar resultados como dict
-    print("\nResultados agregados:")
+    results = rg.evaluate(dataset_result, metrics=[faithfulness, answer_correctness, answer_relevancy], run_config = run_config)
+    print("\nResultados faithfulness:")
     print(results)
+
+    df = pd.DataFrame({
+        "question": [d["question"] for d in data],
+        "faithfulness": results["faithfulness"],
+        "answer_correctness": results["answer_correctness"],
+        "answer_relevancy": results["answer_relevancy"],
+        "hallucination_rate": [1 - f for f in results["faithfulness"]],
+        "latency": latencies
+    })
+
+    df.to_csv("data/metrics_results.csv", index=False)
+    print(" Métricas guardadas en metrics_results.csv")
+    plt.figure(figsize=(12,6))
+    df.plot(
+        x="question",
+        y=["faithfulness", "answer_correctness", "answer_relevancy", "hallucination_rate", "latency"],
+        kind="bar",
+        figsize=(14,6)
+    )
+    plt.title("Evaluación RAG (Faithfulness, Correctness, Relevancy, Hallucination, Latency)")
+    plt.ylabel("Valor")
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    plt.show()
+
+    
+    # results_answer_correctness = rg.evaluate(dataset_result, metrics=[ answer_correctness], run_config = run_config)
+    # print("\nResultados answer_correctness:")
+    # print(results_answer_correctness)
+
+    # results_answer_relevancy = rg.evaluate(dataset_result, metrics=[ answer_relevancy], run_config = run_config)
+    # print("\nResultados answer_correctness:")
+    # print(results_answer_relevancy)
 
     # print("\nResultados por muestra:")
     # print(results.raw)
